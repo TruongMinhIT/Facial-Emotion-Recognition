@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import tensorflow as tf
 import streamlit as st
+import gdown  # <-- Thêm thư viện tải file
 
 from tensorflow.keras.models import load_model
 from tensorflow.keras.applications.resnet50 import preprocess_input
@@ -25,9 +26,22 @@ MODEL_PATH = os.path.join(
     "ResNet50_Emotion_Augmentation_Attention.keras",
 )
 
+# ID Google Drive của bạn
+DRIVE_FILE_ID = "1aM4iLTqMu4Qd7CpYM42_oCnSbPQyFh4W"
 
 @st.cache_resource
 def get_model():
+    # Đảm bảo thư mục models tồn tại trên server
+    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+
+    # Kiểm tra nếu file mô hình chưa có HOẶC bị lỗi LFS (file < 1MB) thì tải từ Drive
+    if not os.path.exists(MODEL_PATH) or os.path.getsize(MODEL_PATH) < 1000000:
+        st.info("Đang tải trọng số AI từ Google Drive xuống máy chủ, vui lòng đợi vài giây...")
+        url = f'https://drive.google.com/uc?id={DRIVE_FILE_ID}'
+        gdown.download(url, MODEL_PATH, quiet=False)
+        st.success("Tải mô hình thành công!")
+
+    # Load model với custom_objects giữ nguyên như cũ của bạn
     model = load_model(
         MODEL_PATH,
         compile=False,
@@ -37,7 +51,6 @@ def get_model():
     )
 
     return model
-
 
 def predict_emotion(tensor):
 
@@ -51,7 +64,6 @@ def predict_emotion(tensor):
     idx = int(np.argmax(preds))
 
     return EMOTION_LABELS[idx], preds
-
 
 def draw_results(image, x, y, w, h, label):
 
