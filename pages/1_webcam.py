@@ -6,6 +6,9 @@ import traceback
 import threading
 import time
 
+# Thêm thư viện để cấp phát Context cho luồng ngầm của Streamlit
+from streamlit.runtime.scriptrunner import add_script_run_ctx
+
 from streamlit_webrtc import (
     webrtc_streamer,
     RTCConfiguration,
@@ -59,15 +62,26 @@ def ai_worker(state, model):
             small_gray = cv2.resize(gray, (0, 0), fx=0.5, fy=0.5)
             faces = detect_faces(small_gray)
             
+            # Lấy kích thước thật của ảnh gốc để chặn viền
+            img_h, img_w = gray.shape
+            
             new_results = []
 
             for (x, y, w, h) in faces:
                 # Trả lại tọa độ chuẩn xác trên ảnh gốc (nhân đôi)
                 x_real, y_real, w_real, h_real = x * 2, y * 2, w * 2, h * 2
 
-                roi = gray[y_real:y_real+h_real, x_real:x_real+w_real]
+                # VÁ LỖI CRASH: Ép tọa độ không được nhỏ hơn 0 và không vượt quá chiều rộng/cao của ảnh
+                x1 = max(0, x_real)
+                y1 = max(0, y_real)
+                x2 = min(img_w, x_real + w_real)
+                y2 = min(img_h, y_real + h_real)
 
-                if roi.size == 0:
+                # Lấy vùng khuôn mặt đã được giới hạn an toàn
+                roi = gray[y1:y2, x1:x2]
+
+                # Nếu khuôn mặt bị khuất hoàn toàn khỏi màn hình thì bỏ qua để tránh lỗi
+                if roi.size == 0 or x2 <= x1 or y2 <= y1:
                     continue
 
                 # 2. Tiền xử lý khung vuông khuôn mặt
@@ -78,6 +92,7 @@ def ai_worker(state, model):
                 idx = int(np.argmax(preds))
                 label = EMOTION_LABELS[idx]
 
+                # Gửi lại tọa độ đã nhân chuẩn xác để hàm draw_results vẽ
                 new_results.append((x_real, y_real, w_real, h_real, label))
                 
             # Cập nhật kết quả tính toán mới nhất cho luồng hiển thị
@@ -85,6 +100,7 @@ def ai_worker(state, model):
                 state["latest_results"] = new_results
                 
         except Exception as e:
+            # In lỗi rõ ràng ra terminal nếu có
             print("Lỗi xử lý tại luồng ngầm AI:", e)
 
 
@@ -111,6 +127,10 @@ def init_backend_system():
     
     # Khởi chạy luồng xử lý AI chạy ngầm xuyên suốt ứng dụng
     ai_thread = threading.Thread(target=ai_worker, args=(state, model), daemon=True)
+    
+    # VÁ LỖI CẢNH BÁO TERMINAL: Cấp phát ngữ cảnh Streamlit cho luồng ngầm
+    add_script_run_ctx(ai_thread)
+    
     ai_thread.start()
     
     return state
@@ -170,4 +190,5 @@ def main():
         },
     )
 
-main()
+if __name__ == "__main__":
+    main()
