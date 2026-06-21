@@ -1,0 +1,229 @@
+/* =========================================================
+   GLOBAL
+========================================================= */
+
+[data-testid="stAppViewContainer"]{
+    background:#0F172A;
+    color:#E2E8F0;
+    font-family:'Segoe UI',sans-serif;
+}
+
+.main .block-container{
+    padding-top:2rem;
+    padding-bottom:2rem;
+    max-width:1200px;
+}
+
+/* =========================================================
+   SIDEBAR
+========================================================= */
+
+[data-testid="stSidebar"]{
+    background:#111827;
+    border-right:1px solid #1F2937;
+}
+
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3{
+    color:white;
+}
+
+/* =========================================================
+   TITLES
+========================================================= */
+
+h1{
+    color:#F8FAFC;
+    font-weight:700;
+}
+
+h2{
+    color:#E2E8F0;
+}
+
+h3{
+    color:#CBD5E1;
+}
+
+p{
+    color:#CBD5E1;
+}
+
+/* =========================================================
+   BUTTON
+========================================================= */
+
+.stButton>button{
+
+    width:100%;
+
+    border-radius:10px;
+
+    border:none;
+
+    background:#2563EB;
+
+    color:white;
+
+    font-weight:600;
+
+    transition:.25s;
+}
+
+.stButton>button:hover{
+
+    background:#1D4ED8;
+
+    transform:translateY(-2px);
+
+}
+
+/* =========================================================
+   FILE UPLOADER
+========================================================= */
+
+[data-testid="stFileUploader"]{
+
+    border:2px dashed #3B82F6;
+
+    border-radius:12px;
+
+    padding:18px;
+
+    background:#111827;
+
+}
+
+/* =========================================================
+   METRIC CARD
+========================================================= */
+
+[data-testid="metric-container"]{
+
+    background:#1E293B;
+
+    border-radius:12px;
+
+    border:1px solid #334155;
+
+    padding:15px;
+
+    box-shadow:0 2px 8px rgba(0,0,0,.25);
+
+}
+
+/* =========================================================
+   EXPANDER
+========================================================= */
+
+.streamlit-expanderHeader{
+
+    font-weight:600;
+
+    color:#E2E8F0;
+
+}
+
+/* =========================================================
+   INFO BOX
+========================================================= */
+
+.stAlert{
+
+    border-radius:12px;
+
+}
+
+/* =========================================================
+   BADGES
+========================================================= */
+
+.emotion-badge{
+
+    display:inline-block;
+
+    padding:8px 18px;
+
+    margin:5px;
+
+    border-radius:999px;
+
+    font-weight:600;
+
+    font-size:15px;
+
+    color:white;
+
+    box-shadow:0 2px 8px rgba(0,0,0,.3);
+
+}
+
+.badge-angry{
+    background:#DC2626;
+}
+
+.badge-disgust{
+    background:#EA580C;
+}
+
+.badge-fear{
+    background:#7C3AED;
+}
+
+.badge-happy{
+    background:#16A34A;
+}
+
+.badge-neutral{
+    background:#475569;
+}
+
+.badge-sad{
+    background:#2563EB;
+}
+
+.badge-surprise{
+    background:#D97706;
+}
+
+/* =========================================================
+   IMAGE
+========================================================= */
+
+img{
+
+    border-radius:12px;
+
+}
+
+/* =========================================================
+   CHART
+========================================================= */
+
+canvas{
+
+    border-radius:12px;
+
+}
+
+/* =========================================================
+   SCROLLBAR
+========================================================= */
+
+::-webkit-scrollbar{
+    width:10px;
+}
+
+::-webkit-scrollbar-track{
+    background:#111827;
+}
+
+::-webkit-scrollbar-thumb{
+    background:#334155;
+    border-radius:8px;
+}
+
+::-webkit-scrollbar-thumb:hover{
+    background:#475569;
+}
