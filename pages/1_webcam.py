@@ -6,8 +6,7 @@ import traceback
 import threading
 import time
 
-# Thêm thư viện để cấp phát Context cho luồng ngầm của Streamlit
-from streamlit.runtime.scriptrunner import add_script_run_ctx
+from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
 from streamlit_webrtc import (
     webrtc_streamer,
@@ -15,7 +14,6 @@ from streamlit_webrtc import (
     WebRtcMode,
 )
 
-# Chỉ import các hàm vẽ và xử lý phụ trợ để tránh xung đột luồng
 from services.predictor import draw_results, get_model
 from services.preprocess import preprocess_face
 from detector.face_detector import detect_faces, load_cascade
@@ -27,7 +25,6 @@ RTC_CONFIGURATION = RTCConfiguration(
     }
 )
 
-# Khai báo cứng nhãn cảm xúc
 EMOTION_LABELS = {
     0: "Angry",
     1: "Disgust",
@@ -39,70 +36,37 @@ EMOTION_LABELS = {
 }
 
 # ==========================================
-# LUỒNG AI CHẠY NGẦM HOÀN TOÀN ĐỘC LẬP
+# LUỒNG AI CHẠY NGẦM
 # ==========================================
 def ai_worker(state, model):
-    """Luồng xử lý AI nhận model truyền vào trực tiếp"""
     while True:
-        img_to_process = None
+        rois_to_process = None
         
         with state["lock"]:
-            if state["latest_frame"] is not None:
-                img_to_process = state["latest_frame"].copy()
-                state["latest_frame"] = None 
+            if state["latest_rois"] is not None:
+                rois_to_process = state["latest_rois"]
+                state["latest_rois"] = None 
                 
-        if img_to_process is None:
+        if rois_to_process is None:
             time.sleep(0.01)
             continue
             
         try:
-            # Thu nhỏ 1/4 để bù trừ cho khung hình 720p to lớn
-            gray = cv2.cvtColor(img_to_process, cv2.COLOR_BGR2GRAY)
-            small_gray = cv2.resize(gray, (0, 0), fx=0.25, fy=0.25)
-            faces = detect_faces(small_gray)
-            
-            img_h, img_w = gray.shape
-            new_results = []
-
-            for (x, y, w, h) in faces:
-                # Ép kiểu int() và nhân 4 để lấy tọa độ thực tế trên ảnh 720p
-                x_real, y_real, w_real, h_real = int(x * 4), int(y * 4), int(w * 4), int(h * 4)
-
-                # CHẶN VIỀN: Không cho tọa độ bị âm hoặc vượt qua mép ảnh
-                x1 = int(max(0, x_real))
-                y1 = int(max(0, y_real))
-                x2 = int(min(img_w, x_real + w_real))
-                y2 = int(min(img_h, y_real + h_real))
-                
-                w_clamped = x2 - x1
-                h_clamped = y2 - y1
-
-                # CHỐNG CRASH: Loại bỏ các vệt bóng mờ ảo (kích thước quá nhỏ) khi di chuyển nhanh
-                if w_clamped < 30 or h_clamped < 30:
-                    continue
-
-                roi = gray[y1:y2, x1:x2]
-
-                if roi.size == 0:
-                    continue
-
+            new_emotions = []
+            for roi in rois_to_process:
                 tensor = preprocess_face(roi)
                 preds = model(tensor, training=False).numpy()[0]
-                idx = int(np.argmax(preds))
-                label = EMOTION_LABELS[idx]
-
-                # LƯU KẾT QUẢ ĐỂ VẼ: Gửi bộ tọa độ đã an toàn tuyệt đối ra ngoài
-                new_results.append((x1, y1, w_clamped, h_clamped, label))
-                
+                new_emotions.append(EMOTION_LABELS[int(np.argmax(preds))])
+            
             with state["lock"]:
-                state["latest_results"] = new_results
+                state["latest_emotions"] = new_emotions
                 
         except Exception as e:
-            print("Lỗi xử lý tại luồng ngầm AI:", e)
+            print("Lỗi luồng AI:", e)
 
 
 # ==========================================
-# KHỞI TẠO HỆ THỐNG VÀ CACHE BIẾN
+# KHỞI TẠO HỆ THỐNG VÀ CACHE
 # ==========================================
 @st.cache_resource
 def init_backend_system():
@@ -113,8 +77,8 @@ def init_backend_system():
     model(dummy, training=False)
     
     state = {
-        "latest_frame": None,
-        "latest_results": [],
+        "latest_rois": None,
+        "latest_emotions": [],
         "lock": threading.Lock()
     }
     
@@ -127,39 +91,72 @@ def init_backend_system():
 shared_state = init_backend_system()
 
 
-# ==========================================
-# LUỒNG XỬ LÝ VIDEO CHÍNH CỦA WEBRTC
-# ==========================================
-def video_frame_callback(frame: av.VideoFrame):
-    # CẤP QUYỀN CHO LUỒNG WEBRTC: Triệt tiêu dòng chữ đỏ "missing ScriptRunContext"
-    add_script_run_ctx(threading.current_thread())
-    
-    try:
-        img = frame.to_ndarray(format="bgr24")
-        
-        with shared_state["lock"]:
-            shared_state["latest_frame"] = img.copy()
-            results = list(shared_state["latest_results"])
-            
-        for (x, y, w, h, label) in results:
-            img = draw_results(img, x, y, w, h, label)
-            
-        return av.VideoFrame.from_ndarray(img, format="bgr24")
-        
-    except Exception as e:
-        traceback.print_exc()
-        return frame
-
-
 def main():
     load_css("assets/style.css")
-
     st.header("📷 Nhận diện cảm xúc Webcam")
 
-    with st.spinner("Đang khởi động AI đa luồng..."):
+    with st.spinner("Đang cấu hình luồng AI đồng bộ siêu mượt..."):
         _ = init_backend_system()
 
     st.write("Nhấn START để bật webcam.")
+
+    # 1. Lấy context của luồng chính (Main Thread)
+    ctx = get_script_run_ctx()
+
+    # ==========================================
+    # LUỒNG VIDEO CHÍNH (Đã đưa vào trong main)
+    # ==========================================
+    def video_frame_callback(frame: av.VideoFrame):
+        # 2. Truyền context của luồng chính cho luồng WebRTC để tắt lỗi cảnh báo đỏ
+        if ctx:
+            add_script_run_ctx(threading.current_thread(), ctx)
+        
+        try:
+            img = frame.to_ndarray(format="bgr24")
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            
+            # KHẮC PHỤC LỖI TÌM MẶT Ở XA: Thu nhỏ 1/2 để ảnh không bị rỗ quá mức
+            small_gray = cv2.resize(gray, (0, 0), fx=0.5, fy=0.5)
+            faces = detect_faces(small_gray)
+            
+            img_h, img_w = gray.shape
+            current_rois = []
+            valid_boxes = []
+
+            for (x, y, w, h) in faces:
+                # Đổi hệ số nhân về 2 tương ứng với tỷ lệ 1/2
+                x_real, y_real, w_real, h_real = int(x * 2), int(y * 2), int(w * 2), int(h * 2)
+
+                x1 = int(max(0, x_real))
+                y1 = int(max(0, y_real))
+                x2 = int(min(img_w, x_real + w_real))
+                y2 = int(min(img_h, y_real + h_real))
+                
+                w_c = x2 - x1
+                h_c = y2 - y1
+
+                if w_c < 30 or h_c < 30:
+                    continue
+
+                roi = gray[y1:y2, x1:x2]
+                if roi.size > 0:
+                    current_rois.append(roi)
+                    valid_boxes.append((x1, y1, w_c, h_c))
+
+            with shared_state["lock"]:
+                if len(current_rois) > 0:
+                    shared_state["latest_rois"] = current_rois
+                emotions = list(shared_state["latest_emotions"])
+
+            for i, (x1, y1, w_c, h_c) in enumerate(valid_boxes):
+                label = emotions[i] if i < len(emotions) else "Detecting..."
+                img = draw_results(img, x1, y1, w_c, h_c, label)
+                
+            return av.VideoFrame.from_ndarray(img, format="bgr24")
+            
+        except Exception as e:
+            traceback.print_exc()
+            return frame
 
     webrtc_streamer(
         key="emotion",
@@ -169,10 +166,9 @@ def main():
         async_processing=True,
         media_stream_constraints={
             "video": {
-                # Ép buộc luồng video chạy đúng chuẩn HD 720p, không để trình duyệt tự làm mờ
-                "width": {"min": 1280, "ideal": 1280},
-                "height": {"min": 720, "ideal": 720},
-                "frameRate": {"ideal": 60},
+                "width": 1280, 
+                "height": 720,
+                "frameRate": 60,
             },
             "audio": False,
         },
