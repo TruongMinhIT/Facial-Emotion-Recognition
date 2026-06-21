@@ -7,3 +7,4 @@ Pillow<11
 matplotlib==3.10.3
 scikit-learn==1.7.0
 seaborn==0.13.2
+gdown
