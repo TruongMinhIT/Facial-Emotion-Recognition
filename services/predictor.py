@@ -32,7 +32,7 @@ DRIVE_FILE_ID = "1aM4iLTqMu4Qd7CpYM42_oCnSbPQyFh4W"
 def get_model():
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
 
-    # Hàm tải file dùng fuzzy=True để ép vượt rào Google Drive
+    # Hàm tải file chuẩn xác nhất với gdown mới
     def force_download():
         st.warning("⚠️ Đang tải AI (164MB) từ mây về máy chủ. Lần đầu sẽ hơi lâu, bạn đừng chuyển trang nhé...")
         if os.path.exists(MODEL_PATH):
@@ -40,8 +40,8 @@ def get_model():
                 os.remove(MODEL_PATH)
             except:
                 pass
-        url = f'https://drive.google.com/uc?id={DRIVE_FILE_ID}'
-        gdown.download(url, MODEL_PATH, quiet=False, fuzzy=True)
+        # Chỉ dùng id= và output=, bỏ qua url và fuzzy
+        gdown.download(id=DRIVE_FILE_ID, output=MODEL_PATH, quiet=False)
         st.success("Tải mô hình thành công! Đang khởi động AI...")
 
     # KIỂM TRA LỚP 1: Chắc chắn file phải nặng hơn 100MB (100,000,000 bytes)
