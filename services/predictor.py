@@ -32,15 +32,24 @@ DRIVE_FILE_ID = "1aM4iLTqMu4Qd7CpYM42_oCnSbPQyFh4W"
 def get_model():
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
 
-    # 1. Tải nếu chưa có
+    # 1. Tải nếu chưa có hoặc file quá nhỏ (dưới 100MB)
     if not os.path.exists(MODEL_PATH) or os.path.getsize(MODEL_PATH) < 100000000:
-        st.info("Đang nạp mô hình AI...")
+        st.info("Đang nạp mô hình từ Google Drive...")
+        # Xóa file cũ nếu có để tránh lỗi ghi đè
+        if os.path.exists(MODEL_PATH):
+            os.remove(MODEL_PATH)
         gdown.download(id=DRIVE_FILE_ID, output=MODEL_PATH, quiet=False)
 
-    # 2. Sử dụng absolute path tuyệt đối và cách load an toàn
-    abs_model_path = os.path.abspath(MODEL_PATH)
+    # 2. KIỂM TRA ĐƯỜNG DẪN (Debug)
+    # In ra thư mục để xem file có nằm ở đó không
+    model_dir = os.path.dirname(MODEL_PATH)
+    st.write(f"Đang kiểm tra thư mục: {model_dir}")
+    st.write(f"Danh sách file: {os.listdir(model_dir)}")
     
-    # Thêm tham số safe_mode=False để Keras không chặn file
+    # 3. Load model với đường dẫn tuyệt đối
+    abs_model_path = os.path.realpath(MODEL_PATH)
+    st.write(f"Load model từ: {abs_model_path}")
+    
     model = load_model(
         abs_model_path,
         compile=False,
