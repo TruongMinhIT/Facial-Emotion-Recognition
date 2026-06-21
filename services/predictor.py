@@ -31,17 +31,21 @@ DRIVE_FILE_ID = "1aM4iLTqMu4Qd7CpYM42_oCnSbPQyFh4W"
 
 @st.cache_resource
 def get_model():
-    # Đảm bảo thư mục models tồn tại trên server
+    # Tạo thư mục models nếu chưa có
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
 
-    # Kiểm tra nếu file mô hình chưa có HOẶC bị lỗi LFS (file < 1MB) thì tải từ Drive
-    if not os.path.exists(MODEL_PATH) or os.path.getsize(MODEL_PATH) < 1000000:
-        st.info("Đang tải trọng số AI từ Google Drive xuống máy chủ, vui lòng đợi vài giây...")
-        url = f'https://drive.google.com/uc?id={DRIVE_FILE_ID}'
-        gdown.download(url, MODEL_PATH, quiet=False)
+    # BƯỚC 1: Xóa cái file "dỏm" (file Git LFS hoặc file HTML tải nhầm dung lượng < 1MB)
+    if os.path.exists(MODEL_PATH) and os.path.getsize(MODEL_PATH) < 1000000:
+        os.remove(MODEL_PATH)
+
+    # BƯỚC 2: Tải file xịn từ Google Drive
+    if not os.path.exists(MODEL_PATH):
+        st.info("Đang tải trọng số AI từ Google Drive xuống máy chủ (Bỏ qua quét virus), vui lòng đợi...")
+        # Dùng trực tiếp tham số id= để gdown tự động vượt qua trang cảnh báo virus của Google
+        gdown.download(id=DRIVE_FILE_ID, output=MODEL_PATH, quiet=False)
         st.success("Tải mô hình thành công!")
 
-    # Load model với custom_objects giữ nguyên như cũ của bạn
+    # BƯỚC 3: Load model chuẩn
     model = load_model(
         MODEL_PATH,
         compile=False,
