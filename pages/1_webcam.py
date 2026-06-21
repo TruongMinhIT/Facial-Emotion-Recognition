@@ -27,7 +27,7 @@ RTC_CONFIGURATION = RTCConfiguration(
     }
 )
 
-# Khai báo cứng nhãn cảm xúc để luồng phụ xử lý trực tiếp không qua Streamlit Cache
+# Khai báo cứng nhãn cảm xúc
 EMOTION_LABELS = {
     0: "Angry",
     1: "Disgust",
@@ -42,65 +42,62 @@ EMOTION_LABELS = {
 # LUỒNG AI CHẠY NGẦM HOÀN TOÀN ĐỘC LẬP
 # ==========================================
 def ai_worker(state, model):
-    """Luồng xử lý AI nhận model truyền vào trực tiếp, không bị dính lỗi Streamlit Context"""
+    """Luồng xử lý AI nhận model truyền vào trực tiếp"""
     while True:
         img_to_process = None
         
-        # Kiểm tra xem có frame mới từ webcam truyền xuống không
         with state["lock"]:
             if state["latest_frame"] is not None:
                 img_to_process = state["latest_frame"].copy()
-                state["latest_frame"] = None  # Đánh dấu đã lấy ảnh thành công
+                state["latest_frame"] = None 
                 
         if img_to_process is None:
-            time.sleep(0.01)  # Nghỉ 10ms nếu chưa có ảnh mới để tránh giải phóng CPU quá đà
+            time.sleep(0.01)
             continue
             
         try:
-            # 1. Thu nhỏ ảnh đi 1/2 để Haar Cascade quét mặt mượt mà không delay
+            # Thu nhỏ 1/4 để bù trừ cho khung hình 720p to lớn
             gray = cv2.cvtColor(img_to_process, cv2.COLOR_BGR2GRAY)
-            small_gray = cv2.resize(gray, (0, 0), fx=0.5, fy=0.5)
+            small_gray = cv2.resize(gray, (0, 0), fx=0.25, fy=0.25)
             faces = detect_faces(small_gray)
             
-            # Lấy kích thước thật của ảnh gốc để chặn viền
             img_h, img_w = gray.shape
-            
             new_results = []
 
             for (x, y, w, h) in faces:
-                # Trả lại tọa độ chuẩn xác trên ảnh gốc (nhân đôi)
-                x_real, y_real, w_real, h_real = x * 2, y * 2, w * 2, h * 2
+                # Ép kiểu int() và nhân 4 để lấy tọa độ thực tế trên ảnh 720p
+                x_real, y_real, w_real, h_real = int(x * 4), int(y * 4), int(w * 4), int(h * 4)
 
-                # VÁ LỖI CRASH: Ép tọa độ không được nhỏ hơn 0 và không vượt quá chiều rộng/cao của ảnh
-                x1 = max(0, x_real)
-                y1 = max(0, y_real)
-                x2 = min(img_w, x_real + w_real)
-                y2 = min(img_h, y_real + h_real)
+                # CHẶN VIỀN: Không cho tọa độ bị âm hoặc vượt qua mép ảnh
+                x1 = int(max(0, x_real))
+                y1 = int(max(0, y_real))
+                x2 = int(min(img_w, x_real + w_real))
+                y2 = int(min(img_h, y_real + h_real))
+                
+                w_clamped = x2 - x1
+                h_clamped = y2 - y1
 
-                # Lấy vùng khuôn mặt đã được giới hạn an toàn
-                roi = gray[y1:y2, x1:x2]
-
-                # Nếu khuôn mặt bị khuất hoàn toàn khỏi màn hình thì bỏ qua để tránh lỗi
-                if roi.size == 0 or x2 <= x1 or y2 <= y1:
+                # CHỐNG CRASH: Loại bỏ các vệt bóng mờ ảo (kích thước quá nhỏ) khi di chuyển nhanh
+                if w_clamped < 30 or h_clamped < 30:
                     continue
 
-                # 2. Tiền xử lý khung vuông khuôn mặt
-                tensor = preprocess_face(roi)
+                roi = gray[y1:y2, x1:x2]
 
-                # 3. Dự đoán siêu tốc bằng cách gọi thẳng object thay vì dùng .predict()
+                if roi.size == 0:
+                    continue
+
+                tensor = preprocess_face(roi)
                 preds = model(tensor, training=False).numpy()[0]
                 idx = int(np.argmax(preds))
                 label = EMOTION_LABELS[idx]
 
-                # Gửi lại tọa độ đã nhân chuẩn xác để hàm draw_results vẽ
-                new_results.append((x_real, y_real, w_real, h_real, label))
+                # LƯU KẾT QUẢ ĐỂ VẼ: Gửi bộ tọa độ đã an toàn tuyệt đối ra ngoài
+                new_results.append((x1, y1, w_clamped, h_clamped, label))
                 
-            # Cập nhật kết quả tính toán mới nhất cho luồng hiển thị
             with state["lock"]:
                 state["latest_results"] = new_results
                 
         except Exception as e:
-            # In lỗi rõ ràng ra terminal nếu có
             print("Lỗi xử lý tại luồng ngầm AI:", e)
 
 
@@ -109,33 +106,24 @@ def ai_worker(state, model):
 # ==========================================
 @st.cache_resource
 def init_backend_system():
-    """Khởi tạo mô hình và kích hoạt luồng ngầm một lần duy nhất"""
-    # Load model và cascade tại luồng chính của Streamlit
     model = get_model()
     load_cascade()
     
-    # Chạy thử nghiệm 1 lần (Warmup) để tránh bị khựng ở frame đầu tiên
     dummy = np.zeros((1, 48, 48, 1), dtype=np.float32)
     model(dummy, training=False)
     
-    # Tạo đối tượng bộ nhớ chia sẻ giữa 2 luồng
     state = {
         "latest_frame": None,
         "latest_results": [],
         "lock": threading.Lock()
     }
     
-    # Khởi chạy luồng xử lý AI chạy ngầm xuyên suốt ứng dụng
     ai_thread = threading.Thread(target=ai_worker, args=(state, model), daemon=True)
-    
-    # VÁ LỖI CẢNH BÁO TERMINAL: Cấp phát ngữ cảnh Streamlit cho luồng ngầm
     add_script_run_ctx(ai_thread)
-    
     ai_thread.start()
     
     return state
 
-# Lấy trạng thái chia sẻ đã được đóng băng bộ nhớ
 shared_state = init_backend_system()
 
 
@@ -143,16 +131,16 @@ shared_state = init_backend_system()
 # LUỒNG XỬ LÝ VIDEO CHÍNH CỦA WEBRTC
 # ==========================================
 def video_frame_callback(frame: av.VideoFrame):
+    # CẤP QUYỀN CHO LUỒNG WEBRTC: Triệt tiêu dòng chữ đỏ "missing ScriptRunContext"
+    add_script_run_ctx(threading.current_thread())
+    
     try:
         img = frame.to_ndarray(format="bgr24")
         
-        # 1. Liên tục ghi đè ảnh mới nhất để luồng AI bốc đi xử lý
         with shared_state["lock"]:
             shared_state["latest_frame"] = img.copy()
-            # Lấy bản sao kết quả nhận diện mới nhất hiện tại để vẽ lên hình
             results = list(shared_state["latest_results"])
             
-        # 2. Luôn luôn vẽ kết quả lên màn hình (nếu AI chưa tính xong frame mới, dùng tạm frame cũ)
         for (x, y, w, h, label) in results:
             img = draw_results(img, x, y, w, h, label)
             
@@ -168,8 +156,7 @@ def main():
 
     st.header("📷 Nhận diện cảm xúc Webcam")
 
-    with st.spinner("Đang cấu hình luồng AI đồng bộ siêu mượt..."):
-        # Đảm bảo hệ thống backend luôn sẵn sàng
+    with st.spinner("Đang khởi động AI đa luồng..."):
         _ = init_backend_system()
 
     st.write("Nhấn START để bật webcam.")
@@ -182,9 +169,10 @@ def main():
         async_processing=True,
         media_stream_constraints={
             "video": {
-                "width": {"ideal": 640},
-                "height": {"ideal": 480},
-                "frameRate": {"ideal": 30},
+                # Ép buộc luồng video chạy đúng chuẩn HD 720p, không để trình duyệt tự làm mờ
+                "width": {"min": 1280, "ideal": 1280},
+                "height": {"min": 720, "ideal": 720},
+                "frameRate": {"ideal": 60},
             },
             "audio": False,
         },
