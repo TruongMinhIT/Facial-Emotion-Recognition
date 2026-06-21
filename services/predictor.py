@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import tensorflow as tf
 import streamlit as st
-import gdown  # <-- Thêm thư viện tải file
+import gdown  
 
 from tensorflow.keras.models import load_model
 from tensorflow.keras.applications.resnet50 import preprocess_input
@@ -26,33 +26,42 @@ MODEL_PATH = os.path.join(
     "ResNet50_Emotion_Augmentation_Attention.keras",
 )
 
-# ID Google Drive của bạn
 DRIVE_FILE_ID = "1aM4iLTqMu4Qd7CpYM42_oCnSbPQyFh4W"
 
 @st.cache_resource
 def get_model():
-    # Tạo thư mục models nếu chưa có
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
 
-    # BƯỚC 1: Xóa cái file "dỏm" (file Git LFS hoặc file HTML tải nhầm dung lượng < 1MB)
-    if os.path.exists(MODEL_PATH) and os.path.getsize(MODEL_PATH) < 1000000:
-        os.remove(MODEL_PATH)
+    # Hàm tải file dùng fuzzy=True để ép vượt rào Google Drive
+    def force_download():
+        st.warning("⚠️ Đang tải AI (164MB) từ mây về máy chủ. Lần đầu sẽ hơi lâu, bạn đừng chuyển trang nhé...")
+        if os.path.exists(MODEL_PATH):
+            try:
+                os.remove(MODEL_PATH)
+            except:
+                pass
+        url = f'https://drive.google.com/uc?id={DRIVE_FILE_ID}'
+        gdown.download(url, MODEL_PATH, quiet=False, fuzzy=True)
+        st.success("Tải mô hình thành công! Đang khởi động AI...")
 
-    # BƯỚC 2: Tải file xịn từ Google Drive
-    if not os.path.exists(MODEL_PATH):
-        st.info("Đang tải trọng số AI từ Google Drive xuống máy chủ (Bỏ qua quét virus), vui lòng đợi...")
-        # Dùng trực tiếp tham số id= để gdown tự động vượt qua trang cảnh báo virus của Google
-        gdown.download(id=DRIVE_FILE_ID, output=MODEL_PATH, quiet=False)
-        st.success("Tải mô hình thành công!")
+    # KIỂM TRA LỚP 1: Chắc chắn file phải nặng hơn 100MB (100,000,000 bytes)
+    if not os.path.exists(MODEL_PATH) or os.path.getsize(MODEL_PATH) < 100000000:
+        force_download()
 
-    # BƯỚC 3: Load model chuẩn
-    model = load_model(
-        MODEL_PATH,
-        compile=False,
-        custom_objects={
-            "preprocess_input": preprocess_input
-        }
-    )
+    # KIỂM TRA LỚP 2: Bẫy lỗi. Nếu file đủ dung lượng nhưng bị rách/hỏng thì ép tải lại
+    try:
+        model = load_model(
+            MODEL_PATH,
+            compile=False,
+            custom_objects={"preprocess_input": preprocess_input}
+        )
+    except Exception as e:
+        force_download()
+        model = load_model(
+            MODEL_PATH,
+            compile=False,
+            custom_objects={"preprocess_input": preprocess_input}
+        )
 
     return model
 
