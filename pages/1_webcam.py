@@ -15,11 +15,9 @@ from detector.face_detector import detect_faces, load_cascade
 from utils.style_loader import load_css
 
 # ─── Config ────────────────────────────────────────────────
+# FIX LỖI 1: Tắt STUN Server để webcam bật lên ngay lập tức trong 1 giây
 RTC_CONFIGURATION = RTCConfiguration({
-    "iceServers": [
-        {"urls": ["stun:stun.l.google.com:19302"]},
-        {"urls": ["stun:stun1.l.google.com:19302"]},
-    ]
+    "iceServers": []
 })
 
 EMOTION_LABELS = {
@@ -48,17 +46,22 @@ def ai_worker(state, model):
             if state["latest_rois"] is not None:
                 rois_to_process = state["latest_rois"]
                 state["latest_rois"] = None
-        if rois_to_process is None:
+                
+        # Bỏ qua nếu không có khuôn mặt nào được gửi đến
+        if rois_to_process is None or len(rois_to_process) == 0:
             time.sleep(0.01)
             continue
+            
         try:
             new_emotions = []
             for roi in rois_to_process:
                 tensor = preprocess_face(roi)
                 preds = model(tensor, training=False).numpy()[0]
                 new_emotions.append(EMOTION_LABELS[int(np.argmax(preds))])
+                
             with state["lock"]:
                 state["latest_emotions"] = new_emotions
+                
         except Exception as e:
             print("AI worker error:", e)
 
@@ -162,8 +165,7 @@ def main():
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            st.markdown('<div class="camera-selector-title">📹 Độ phân giải</div>',
-                        unsafe_allow_html=True)
+            st.markdown('<div class="camera-selector-title">📹 Độ phân giải</div>', unsafe_allow_html=True)
             res_label = st.selectbox(
                 "Độ phân giải", options=list(RESOLUTION_OPTIONS.keys()),
                 index=0, label_visibility="collapsed",
@@ -171,16 +173,14 @@ def main():
             res_w, res_h = RESOLUTION_OPTIONS[res_label]
 
         with col2:
-            st.markdown('<div class="camera-selector-title">🎞️ Frame Rate</div>',
-                        unsafe_allow_html=True)
+            st.markdown('<div class="camera-selector-title">🎞️ Frame Rate</div>', unsafe_allow_html=True)
             fps = st.select_slider(
                 "FPS", options=[15, 24, 30, 60], value=30,
                 label_visibility="collapsed",
             )
 
         with col3:
-            st.markdown('<div class="camera-selector-title">⚡ Scale xử lý AI</div>',
-                        unsafe_allow_html=True)
+            st.markdown('<div class="camera-selector-title">⚡ Scale xử lý AI</div>', unsafe_allow_html=True)
             scale_label = st.selectbox(
                 "Scale", options=list(SCALE_OPTIONS.keys()),
                 index=0, label_visibility="collapsed",
@@ -202,37 +202,52 @@ def main():
         try:
             img = frame.to_ndarray(format="bgr24")
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            
+            # Logic thu nhỏ của bạn rất chuẩn xác
             small_gray = cv2.resize(gray, (0, 0), fx=proc_scale, fy=proc_scale)
             faces = detect_faces(small_gray)
+            
             inv = 1.0 / proc_scale
             img_h, img_w = gray.shape
             current_rois, valid_boxes = [], []
+            
             for (x, y, w, h) in faces:
                 x1 = int(max(0, x * inv))
                 y1 = int(max(0, y * inv))
                 x2 = int(min(img_w, (x + w) * inv))
                 y2 = int(min(img_h, (y + h) * inv))
                 wc, hc = x2 - x1, y2 - y1
+                
                 if wc < 30 or hc < 30:
                     continue
+                    
                 roi = gray[y1:y2, x1:x2]
                 if roi.size > 0:
                     current_rois.append(roi)
                     valid_boxes.append((x1, y1, wc, hc))
+                    
             with shared_state["lock"]:
-                if current_rois:
+                if len(current_rois) > 0:
                     shared_state["latest_rois"] = current_rois
+                else:
+                    # FIX LỖI 2: Xóa bộ đệm AI ngay lập tức khi khuôn mặt rời khỏi khung hình
+                    # Ngăn chặn việc hiển thị kết quả ảo bị kẹt từ hàng ngàn frame trước
+                    shared_state["latest_emotions"] = []
+                    
                 emotions = list(shared_state["latest_emotions"])
+                
             for i, (x1, y1, wc, hc) in enumerate(valid_boxes):
                 label = emotions[i] if i < len(emotions) else "Detecting..."
                 img = draw_results(img, x1, y1, wc, hc, label)
+                
             return av.VideoFrame.from_ndarray(img, format="bgr24")
+            
         except Exception:
             traceback.print_exc()
             return frame
 
     webrtc_streamer(
-        key=f"emotion-stream-{res_w}x{res_h}-{fps}fps",
+        key="emotion", # FIX LỖI 3: Để key cố định, KHÔNG gán biến độ phân giải vào đây
         mode=WebRtcMode.SENDRECV,
         rtc_configuration=RTC_CONFIGURATION,
         video_frame_callback=video_frame_callback,
@@ -272,7 +287,6 @@ def main():
         </ul>
     </div>
     """, unsafe_allow_html=True)
-
 
 if __name__ == "__main__":
     main()
